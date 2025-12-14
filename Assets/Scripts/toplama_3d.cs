@@ -1,60 +1,94 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using UnityEngine.Networking;
 using TMPro;
 using System.IO;
+using System.Text; // UTF-8 için
 
 public class toplama_3d : MonoBehaviour
 {
-    public float displayDuration = 8f;
-    public int toplanan_sikke = 0;
+    public float displayDuration = 10f;
+    private bool isDisplayingText = false;
+
     public TextMeshProUGUI Mesaj;
     public TextMeshProUGUI Sikke;
+    public int sikke = 0;
 
     private CoinSpawner[] allSpawners;
 
     void Start()
     {
-        Mesaj.text = "";
-        Sikke.text = "Sikke: "+toplanan_sikke;
-        Mesaj.enabled = false;
+        if (Mesaj != null)
+        {
+            Mesaj.text = "";
+            Mesaj.enabled = false;
+        }
 
+        if (Sikke != null)
+        {
+            Sikke.text = "Sikke: " + sikke;
+        }
+
+        // Sahnedeki tüm CoinSpawner bileşenlerini bul
         allSpawners = FindObjectsOfType<CoinSpawner>();
     }
 
     private void OnCollisionEnter(Collision collision)
     {
-        if (collision.gameObject.tag != "toplanacak") return;
+        if (!collision.gameObject.CompareTag("toplanacak"))
+            return;
 
-        // 1) Coini yok edelim
+        sikke++;
+        if (Sikke != null)
+            Sikke.text = "Sikke: " + sikke;
+
         Destroy(collision.gameObject);
 
-        toplanan_sikke++;
-        Sikke.text = "Sikke: "+toplanan_sikke;
+        // ——— Buradan sonrası CoinSpawner mantığı ———
 
-        // 2) Yakındaki spawner’ı bulalım
         CoinSpawner nearest = GetNearestSpawner();
-
         if (nearest == null)
         {
-            Debug.LogError("Yakında bir yapı bulunamadı!");
+            Debug.LogError("Yakında CoinSpawner bulunamadı!");
             return;
         }
 
-        // 3) CSV dosyasını okuyalım
+        if (string.IsNullOrEmpty(nearest.csvFilePath))
+        {
+            Debug.LogError("CoinSpawner.csvFilePath boş!");
+            return;
+        }
+
         if (!File.Exists(nearest.csvFilePath))
         {
             Debug.LogError("CSV bulunamadı: " + nearest.csvFilePath);
             return;
         }
 
-        List<string> lines = new List<string>(File.ReadAllLines(nearest.csvFilePath));
+        List<string> lines = ReadAllLinesUtf8(nearest.csvFilePath);
 
-        if (lines.Count == 0) return;
+        // ilk satır başlık, onu atla
+        if (lines == null || lines.Count <= 1)
+        {
+            Debug.LogWarning("CSV dosyasında başlık dışında satır yok: " + nearest.csvFilePath);
+            return;
+        }
 
-        string randomLine = lines[Random.Range(0, lines.Count)];
+        int randomIndex = Random.Range(1, lines.Count); // 0 = başlık
+        string line = lines[randomIndex];
 
-        StartCoroutine(DisplayText(randomLine));
+        // virgülle ayrılmış CSV kabulü
+        string[] parts = line.Split(',');
+
+        // Mesaj kolonun kaçıncı olduğuna göre burayı değiştir
+        string message = parts.Length > 1 ? parts[1].Trim() : line.Trim();
+
+        Debug.Log($"Seçilen satır: {randomIndex}, mesaj: {message}");
+
+        StartCoroutine(DisplayText(message));
     }
 
     private CoinSpawner GetNearestSpawner()
@@ -64,8 +98,13 @@ public class toplama_3d : MonoBehaviour
 
         foreach (var spawner in allSpawners)
         {
-            float dist = Vector3.Distance(transform.position, spawner.targetPrefab.transform.position);
+            if (spawner == null) continue;
 
+            Vector3 pos = spawner.targetPrefab != null
+                ? spawner.targetPrefab.transform.position
+                : spawner.transform.position;
+
+            float dist = Vector3.Distance(transform.position, pos);
             if (dist < minDist)
             {
                 minDist = dist;
@@ -76,11 +115,38 @@ public class toplama_3d : MonoBehaviour
         return nearest;
     }
 
+    private List<string> ReadAllLinesUtf8(string path)
+    {
+        var result = new List<string>();
+
+        using (var reader = new StreamReader(path, Encoding.UTF8, true))
+        {
+            while (!reader.EndOfStream)
+            {
+                string line = reader.ReadLine();
+                if (!string.IsNullOrWhiteSpace(line))
+                    result.Add(line.Trim());
+            }
+        }
+
+        return result;
+    }
+
     private IEnumerator DisplayText(string message)
     {
-        Mesaj.text = message;
-        Mesaj.enabled = true;
+        isDisplayingText = true;
+
+        if (Mesaj != null)
+        {
+            Mesaj.text = message;
+            Mesaj.enabled = true;
+        }
+
         yield return new WaitForSeconds(displayDuration);
-        Mesaj.enabled = false;
+
+        if (Mesaj != null)
+            Mesaj.enabled = false;
+
+        isDisplayingText = false;
     }
 }
